@@ -380,6 +380,105 @@ def _cmd_manifest(args: argparse.Namespace) -> None:
         )
 
 
+def _cmd_bridge(args: argparse.Namespace) -> None:
+    """Generate bridged composition YAML or JSON patches from a diagnosed composition."""
+    paths = _resolve_paths(args.files)
+    if not paths:
+        print("No composition files found.", file=sys.stderr)
+        sys.exit(1)
+
+    for path in paths:
+        try:
+            comp = load_composition(path)
+            diag = diagnose(comp)
+        except CompositionError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error processing {path}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        if not diag.blind_spots:
+            print(f"  {path.name}: no blind spots — already fully bridged.")
+            continue
+
+        fmt = getattr(args, "format", "yaml")
+        if fmt == "json-patch":
+            from seam_lint.witness import witness, composition_hash
+            comp_hash = composition_hash(path.read_bytes())
+            receipt = witness(diag, comp_hash)
+            patches = [p.to_seam_patch() for p in receipt.patches]
+            print(json.dumps(patches, indent=2))
+        else:
+            # Generate bridged YAML
+            raw = yaml.safe_load(path.read_text())
+            tools_section = raw.get("tools", {})
+            for br in diag.bridges:
+                for tool_name in br.add_to:
+                    if tool_name in tools_section:
+                        tool = tools_section[tool_name]
+                        internal = tool.get("internal_state", [])
+                        obs = tool.get("observable_schema", [])
+                        if br.field not in internal:
+                            internal.append(br.field)
+                        if br.field not in obs:
+                            obs.append(br.field)
+
+            output_yaml = yaml.dump(raw, default_flow_style=False, sort_keys=False)
+            if args.output:
+                out_path = Path(args.output)
+                out_path.write_text(output_yaml)
+                print(f"  Wrote bridged composition to {out_path}", file=sys.stderr)
+
+                # Verify the bridge worked
+                bridged_comp = load_composition(out_path)
+                bridged_diag = diagnose(bridged_comp)
+                before = len(diag.blind_spots)
+                after = len(bridged_diag.blind_spots)
+                print(
+                    f"  {path.name}: {before} → {after} blind spots",
+                    file=sys.stderr,
+                )
+            else:
+                print(output_yaml)
+
+
+def _cmd_witness(args: argparse.Namespace) -> None:
+    """Diagnose and emit a WitnessReceipt as JSON."""
+    paths = _resolve_paths(args.files)
+    if not paths:
+        print("No composition files found.", file=sys.stderr)
+        sys.exit(1)
+
+    from seam_lint.witness import witness, composition_hash
+
+    receipts = []
+    for path in paths:
+        try:
+            comp = load_composition(path)
+            diag = diagnose(comp)
+        except CompositionError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error processing {path}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        comp_hash = composition_hash(path.read_bytes())
+        receipt = witness(diag, comp_hash)
+        receipts.append(receipt.to_dict())
+
+    if len(receipts) == 1:
+        print(json.dumps(receipts[0], indent=2))
+    else:
+        print(json.dumps(receipts, indent=2))
+
+
+def _cmd_serve() -> None:
+    from seam_lint.serve import run_server
+    run_server()
+
+
 def _cmd_scan(args: argparse.Namespace) -> None:
     from seam_lint.guard import SeamGuard
     from seam_lint.scan import ScanError, scan_mcp_server, scan_mcp_servers
@@ -566,6 +665,45 @@ def main() -> None:
     )
     p_manifest.set_defaults(func=_cmd_manifest)
 
+    # ── bridge ─────────────────────────────────────────────────────────
+    p_bridge = subparsers.add_parser(
+        "bridge",
+        help="Auto-generate bridged composition or JSON patches",
+    )
+    p_bridge.add_argument(
+        "files", nargs="+", type=Path,
+        help="YAML composition file(s)",
+    )
+    p_bridge.add_argument(
+        "--format",
+        choices=["yaml", "json-patch"],
+        default="yaml",
+        help="Output format: bridged YAML (default) or JSON patches",
+    )
+    p_bridge.add_argument(
+        "-o", "--output", default=None,
+        help="Write output to file instead of stdout",
+    )
+    p_bridge.set_defaults(func=_cmd_bridge)
+
+    # ── witness ────────────────────────────────────────────────────────
+    p_witness = subparsers.add_parser(
+        "witness",
+        help="Diagnose and emit a WitnessReceipt (JSON)",
+    )
+    p_witness.add_argument(
+        "files", nargs="+", type=Path,
+        help="YAML composition file(s)",
+    )
+    p_witness.set_defaults(func=_cmd_witness)
+
+    # ── serve ─────────────────────────────────────────────────────────
+    p_serve = subparsers.add_parser(
+        "serve",
+        help="Run as MCP server (stdio transport)",
+    )
+    p_serve.set_defaults(func=lambda _: _cmd_serve())
+
     # ── init ──────────────────────────────────────────────────────────
     p_init = subparsers.add_parser(
         "init",
@@ -585,6 +723,9 @@ def main() -> None:
         print("  seam-lint diagnose --examples     # try bundled compositions")
         print("  seam-lint diagnose my-comp.yaml    # diagnose your own")
         print("  seam-lint check compositions/      # CI gate (exit 1 on blind spots)")
+        print("  seam-lint bridge comp.yaml -o bridged.yaml  # auto-bridge blind spots")
+        print("  seam-lint witness comp.yaml        # emit witness receipt (JSON)")
+        print("  seam-lint serve                    # run as MCP server (stdio)")
         print("  seam-lint manifest --from-json tools.json  # generate manifests")
         print("  seam-lint init                     # interactive composition wizard")
         print()

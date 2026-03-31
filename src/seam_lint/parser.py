@@ -100,33 +100,57 @@ def _validate_edge(edge_data: Any, index: int, tool_names: set[str]) -> Edge:
     return Edge(from_tool=from_tool, to_tool=to_tool, dimensions=tuple(dims))
 
 
-def load_composition(path: Path) -> Composition:
-    """Load and validate a YAML composition file.
+def _parse_composition_data(
+    data: Any, source: str, default_name: str | None = None,
+) -> Composition:
+    """Validate parsed YAML data and return a Composition.
 
-    Raises CompositionError with actionable messages on validation failure.
+    ``source`` is used in error messages (file path or '<text>').
+    ``default_name`` is used when the YAML has no ``name`` field.
     """
-    try:
-        with open(path) as f:
-            data = yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        raise CompositionError(f"Invalid YAML in {path}: {e}") from e
-
     if not isinstance(data, dict):
-        raise CompositionError(f"{path}: expected a YAML mapping at top level")
+        raise CompositionError(f"{source}: expected a YAML mapping at top level")
 
-    name = data.get("name", path.stem)
-    _require_type(name, str, "name", str(path))
+    name = data.get("name", default_name or source)
+    _require_type(name, str, "name", source)
 
-    tools_data = _require_key(data, "tools", str(path))
-    _require_type(tools_data, dict, "tools", str(path))
+    tools_data = _require_key(data, "tools", source)
+    _require_type(tools_data, dict, "tools", source)
     if not tools_data:
-        raise CompositionError(f"{path}: 'tools' must contain at least one tool")
+        raise CompositionError(f"{source}: 'tools' must contain at least one tool")
 
     tools = [_validate_tool(tname, tspec) for tname, tspec in tools_data.items()]
     tool_names = {t.name for t in tools}
 
-    edges_data = _require_key(data, "edges", str(path))
-    _require_type(edges_data, list, "edges", str(path))
+    edges_data = _require_key(data, "edges", source)
+    _require_type(edges_data, list, "edges", source)
     edges = [_validate_edge(e, i, tool_names) for i, e in enumerate(edges_data)]
 
     return Composition(name=name, tools=tools, edges=edges)
+
+
+def load_composition(path: Path | None = None, *, text: str | None = None) -> Composition:
+    """Load and validate a composition from a YAML file or string.
+
+    Exactly one of ``path`` or ``text`` must be provided.
+    Raises CompositionError with actionable messages on validation failure.
+    """
+    if path is not None and text is not None:
+        raise CompositionError("Provide path or text, not both")
+    if path is None and text is None:
+        raise CompositionError("Provide path or text")
+
+    if path is not None:
+        try:
+            with open(path) as f:
+                data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise CompositionError(f"Invalid YAML in {path}: {e}") from e
+        return _parse_composition_data(data, str(path), default_name=path.stem)
+
+    # text path
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise CompositionError(f"Invalid YAML: {e}") from e
+    return _parse_composition_data(data, "<text>")

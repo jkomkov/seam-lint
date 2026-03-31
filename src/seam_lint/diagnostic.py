@@ -49,14 +49,23 @@ def diagnose(comp: Composition) -> Diagnostic:
 
     bridges: list[Bridge] = []
     for bs in blind_spots:
-        add_to: list[str] = []
+        edge_parts = bs.edge.split(" \u2192 ")
         if bs.from_hidden:
-            add_to.append(bs.edge.split(" \u2192 ")[0])
+            bridges.append(
+                Bridge(
+                    field=bs.from_field,
+                    add_to=[edge_parts[0]],
+                    eliminates=bs.dimension,
+                )
+            )
         if bs.to_hidden:
-            add_to.append(bs.edge.split(" \u2192 ")[1])
-        bridges.append(
-            Bridge(field=bs.from_field, add_to=add_to, eliminates=bs.dimension)
-        )
+            bridges.append(
+                Bridge(
+                    field=bs.to_field,
+                    add_to=[edge_parts[1]],
+                    eliminates=bs.dimension,
+                )
+            )
 
     bridged = list(comp.tools)
     for br in bridges:

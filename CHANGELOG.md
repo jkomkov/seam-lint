@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+- **Witness kernel** (`witness.py`): deterministic measurement → receipt pipeline with three-layer separation (measurement / binding / judgment)
+- **Constitutional objects**: `Disposition` enum (5 levels), `BridgePatch` (frozen, Seam Patch v0.1), `WitnessReceipt` (content-addressable, tamper-evident)
+- **`seam-lint serve`** — MCP stdio server exposing 2 tools + 1 resource:
+  - `seam_lint.witness`: composition YAML → WitnessReceipt (atomic measure-bind-judge)
+  - `seam_lint.bridge`: composition YAML → patched composition + receipt + before/after metrics
+  - `seam_lint.taxonomy` resource: convention taxonomy for agent inspection
+- **`seam-lint bridge`** — auto-generate bridged composition YAML or Seam Patches from diagnosed composition
+- **`seam-lint witness`** — diagnose and emit WitnessReceipt as JSON
+- **`Diagnostic.content_hash()`** — deterministic SHA-256 of measurement content (excludes timestamps)
+- **`load_composition(text=)`** — parser accepts string input for MCP server use
+- **Policy profile**: `witness()` and `_resolve_disposition()` accept named `policy_profile` parameter (default: `witness.default.v1`), recorded in receipt and receipt hash
+- **Seam Patch v0.1**: `BridgePatch.to_seam_patch()` — explicitly typed patch format, not RFC 6902
+- **Typed error vocabulary**: `WitnessErrorCode` enum (4 codes), `WitnessError` exception
+- **Anti-reflexivity enforcement**: AST-level test proves `diagnostic.py` has zero imports from `witness.py` (Law 1); bounded recursion via `depth` parameter with `MAX_DEPTH=10` (Law 7)
+- **Three-hash boundary**: `composition_hash` (what was proposed), `diagnostic_hash` (what was measured), `receipt_hash` (what was witnessed) — tested for independence
+- 33 new tests (233 total)
+
+### Fixed
+- **Bridge generation bug**: when `from_field != to_field` and both sides hidden, destination tool received wrong field. Now generates separate Bridge per side with correct field.
+
+### Changed
+- `to_json_patch()` renamed to `to_seam_patch()` with `seam_patch_version: "0.1.0"` field
+- `receipt_hash` docstring documents timestamp inclusion semantics (unique event identity vs deduplication via `diagnostic_hash`)
+- Bridge response includes `original_composition_hash` for traceability
+
 ## 0.5.0
 
 ### Added
