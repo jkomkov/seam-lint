@@ -1,6 +1,6 @@
 """seam-lint: Coherence fee diagnostic for agent tool compositions."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from seam_lint.model import (
     BlindSpot,

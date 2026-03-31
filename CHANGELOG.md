@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.3.0 (unreleased)
+
+### Added
+- `seam-lint manifest --publish` — anchor manifest commitment hash to Bitcoin timechain via OpenTimestamps
+- `seam-lint manifest --verify` — verify OTS proof on a published manifest
+- `seam-lint manifest --verify --upgrade` — upgrade pending proofs to confirmed after Bitcoin block inclusion
+- Optional `[ots]` extra: `pip install seam-lint[ots]` (base install stays single-dependency)
+- Commitment hash excludes OTS fields for deterministic verification after publish
+- 11 new OTS tests (mocked calendars, no network required)
+
+## 0.2.0
 
 ### Added
 - `seam-lint manifest` — generate and validate Seam Manifest files from MCP tool definitions

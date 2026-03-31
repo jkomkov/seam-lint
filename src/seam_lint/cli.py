@@ -260,6 +260,53 @@ def _cmd_manifest(args: argparse.Namespace) -> None:
         )
         return
 
+    if getattr(args, "publish", None):
+        from seam_lint.ots import publish_manifest
+        path = Path(args.publish)
+        if not path.exists():
+            print(f"Error: file not found: {path}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            publish_manifest(path)
+            print(f"  PUBLISHED  {path}")
+            print("  Commitment hash anchored to Bitcoin timechain via OpenTimestamps.", file=sys.stderr)
+            print("  Proof status: pending (confirm after ~2 hours with --verify).", file=sys.stderr)
+        except ImportError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if getattr(args, "verify", None):
+        from seam_lint.ots import verify_manifest as ots_verify
+        path = Path(args.verify)
+        if not path.exists():
+            print(f"Error: file not found: {path}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            if getattr(args, "upgrade", False):
+                from seam_lint.ots import upgrade_proof
+                result = upgrade_proof(path)
+                if result.get("upgraded"):
+                    print(f"  UPGRADED  {path}", file=sys.stderr)
+            result = ots_verify(path)
+            if result.get("valid"):
+                status = result["status"]
+                print(f"  {status.upper()}  {path}  hash={result['commitment_hash'][:16]}...")
+                if status == "confirmed":
+                    print(f"  Bitcoin block(s): {result['bitcoin_block_heights']}")
+                elif status == "pending":
+                    print(f"  {result['note']}", file=sys.stderr)
+            else:
+                print(f"  INVALID  {path}: {result['error']}", file=sys.stderr)
+                sys.exit(1)
+        except ImportError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
     if args.validate:
         path = Path(args.validate)
         if not path.exists():
@@ -494,6 +541,19 @@ def main() -> None:
     p_manifest.add_argument(
         "--validate", metavar="FILE",
         help="Validate an existing manifest YAML",
+    )
+    p_manifest.add_argument(
+        "--publish", metavar="FILE",
+        help="Anchor manifest to Bitcoin timechain via OpenTimestamps (requires seam-lint[ots])",
+    )
+    p_manifest.add_argument(
+        "--verify", metavar="FILE",
+        help="Verify OTS proof on a published manifest",
+    )
+    p_manifest.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="With --verify: upgrade pending proofs to confirmed",
     )
     p_manifest.add_argument(
         "-o", "--output", metavar="FILE", default=None,
