@@ -1,0 +1,153 @@
+taxonomy_version: "0.1"
+dimensions:
+  date_format:
+    description: "How dates and timestamps are represented"
+    known_values:
+      - "ISO-8601"
+      - "US-MM/DD/YYYY"
+      - "EU-DD/MM/YYYY"
+      - "unix_epoch"
+      - "business_days"
+      - "calendar_days"
+    field_patterns:
+      - "*_date"
+      - "*_time"
+      - "*_timestamp"
+      - "created_at"
+      - "updated_at"
+      - "*_datetime"
+    domains:
+      - "universal"
+
+  amount_unit:
+    description: "The scale and currency of monetary amounts"
+    known_values:
+      - "dollars"
+      - "cents"
+      - "basis_points"
+      - "thousands"
+      - "millions"
+    field_patterns:
+      - "*_amount"
+      - "*_price"
+      - "*_cost"
+      - "*_fee"
+      - "*_total"
+      - "*_balance"
+    domains:
+      - "financial"
+
+  rate_scale:
+    description: "How rates, percentages, and probabilities are scaled"
+    known_values:
+      - "decimal_0_1"
+      - "percentage_0_100"
+      - "basis_points"
+      - "per_mille"
+    field_patterns:
+      - "*_rate"
+      - "*_percent"
+      - "*_ratio"
+      - "*_probability"
+    domains:
+      - "financial"
+      - "ml"
+
+  score_range:
+    description: "The range and normalization of scores and ratings"
+    known_values:
+      - "0_to_1"
+      - "0_to_5"
+      - "0_to_10"
+      - "0_to_100"
+      - "1_to_5"
+    field_patterns:
+      - "*_score"
+      - "*_rating"
+      - "*_priority"
+      - "*_rank"
+    domains:
+      - "universal"
+
+  id_offset:
+    description: "Whether identifiers and indices are zero-based or one-based"
+    known_values:
+      - "zero_based"
+      - "one_based"
+      - "uuid"
+      - "auto_increment"
+    field_patterns:
+      - "*_id"
+      - "*_index"
+      - "*_offset"
+      - "*_position"
+    domains:
+      - "universal"
+
+  precision:
+    description: "Numeric precision and rounding convention"
+    known_values:
+      - "0_decimal"
+      - "2_decimal"
+      - "4_decimal"
+      - "full_float64"
+      - "arbitrary"
+    field_patterns:
+      - "*_precision"
+      - "*_decimals"
+      - "*_rounding"
+    domains:
+      - "financial"
+      - "scientific"
+
+  encoding:
+    description: "Text encoding and character set convention"
+    known_values:
+      - "UTF-8"
+      - "ASCII"
+      - "Latin-1"
+      - "UTF-16"
+    field_patterns:
+      - "*_encoding"
+      - "*_charset"
+    domains:
+      - "devops"
+      - "universal"
+
+  null_handling:
+    description: "How missing or null values are represented"
+    known_values:
+      - "explicit_none"
+      - "empty_string"
+      - "zero"
+      - "sentinel_value"
+      - "omit_field"
+    field_patterns: []
+    domains:
+      - "universal"
+
+  timezone:
+    description: "Timezone convention for datetime values"
+    known_values:
+      - "UTC"
+      - "local"
+      - "US_Eastern"
+      - "EU_Central"
+      - "server_local"
+    field_patterns:
+      - "*_tz"
+      - "*_timezone"
+    domains:
+      - "universal"
+
+  line_ending:
+    description: "Text line ending convention"
+    known_values:
+      - "LF"
+      - "CRLF"
+      - "CR"
+    field_patterns:
+      - "*_text"
+      - "*_content"
+    domains:
+      - "devops"

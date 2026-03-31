@@ -1,0 +1,534 @@
+"""CLI entry point: diagnose and check subcommands."""
+
+from __future__ import annotations
+
+import argparse
+import importlib.resources
+import json
+import sys
+from pathlib import Path
+
+import yaml
+
+from seam_lint import __version__
+from seam_lint.diagnostic import diagnose
+from seam_lint.formatters import format_json, format_sarif, format_text
+from seam_lint.parser import CompositionError, load_composition
+
+
+def _resolve_paths(raw: list[Path]) -> list[Path]:
+    paths: list[Path] = []
+    for p in raw:
+        if p.is_dir():
+            paths.extend(sorted(p.glob("*.yaml")))
+            paths.extend(sorted(p.glob("*.yml")))
+        else:
+            paths.append(p)
+    return paths
+
+
+def _examples_dir() -> Path:
+    """Locate bundled composition examples."""
+    pkg = importlib.resources.files("seam_lint")
+    return Path(str(pkg / "compositions"))
+
+
+def _cmd_diagnose(args: argparse.Namespace) -> None:
+    if args.examples:
+        paths = _resolve_paths([_examples_dir()])
+    elif not args.files:
+        print("Error: provide composition files or use --examples",
+              file=sys.stderr)
+        sys.exit(1)
+    else:
+        paths = _resolve_paths(args.files)
+
+    if not paths:
+        print("No composition files found.", file=sys.stderr)
+        sys.exit(1)
+
+    diagnostics: list[tuple] = []
+    for path in paths:
+        try:
+            comp = load_composition(path)
+            diag = diagnose(comp)
+            diagnostics.append((diag, path))
+        except CompositionError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error processing {path}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    fmt = getattr(args, "format", "text")
+    brief = getattr(args, "brief", False)
+
+    if fmt == "sarif":
+        print(format_sarif(diagnostics))
+    elif fmt == "json":
+        if len(diagnostics) == 1:
+            print(format_json(diagnostics[0][0], diagnostics[0][1]))
+        else:
+            combined = [
+                json.loads(format_json(d, p)) for d, p in diagnostics
+            ]
+            print(json.dumps(combined, indent=2))
+    elif brief:
+        for diag, path in diagnostics:
+            bs = len(diag.blind_spots)
+            status = "PASS" if diag.coherence_fee == 0 else "FAIL"
+            print(
+                f"  {status}  {path.name}  "
+                f"blind_spots={bs}  fee={diag.coherence_fee}"
+            )
+        print()
+    else:
+        sep = "\u2500" * 60
+        for i, (d, _p) in enumerate(diagnostics):
+            if i > 0:
+                print(sep)
+            print(format_text(d))
+
+        if len(diagnostics) > 1:
+            print("\u2501" * 60)
+            fees = [d.coherence_fee for d, _ in diagnostics]
+            total_bs = sum(len(d.blind_spots) for d, _ in diagnostics)
+            print(f"  Summary: {len(diagnostics)} compositions")
+            print(
+                f"  Fully bridged (fee = 0): "
+                f"{sum(1 for f in fees if f == 0)}"
+            )
+            print(
+                f"  Require bridging (fee > 0): "
+                f"{sum(1 for f in fees if f > 0)}"
+            )
+            print(f"  Total blind-spot dimensions: {total_bs}")
+            print(f"  Max coherence fee: {max(fees)}")
+            print()
+
+
+def _cmd_check(args: argparse.Namespace) -> None:
+    if args.examples:
+        paths = _resolve_paths([_examples_dir()])
+    elif not args.files:
+        print("Error: provide composition files or use --examples",
+              file=sys.stderr)
+        sys.exit(1)
+    else:
+        paths = _resolve_paths(args.files)
+
+    if not paths:
+        print("No composition files found.", file=sys.stderr)
+        sys.exit(1)
+
+    diagnostics: list[tuple] = []
+    for path in paths:
+        try:
+            comp = load_composition(path)
+            diag = diagnose(comp)
+            diagnostics.append((diag, path))
+        except CompositionError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error processing {path}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    failed = False
+    for diag, path in diagnostics:
+        bs_count = len(diag.blind_spots)
+        ub_count = diag.n_unbridged
+        if bs_count > args.max_blind_spots:
+            failed = True
+            print(
+                f"FAIL {path.name}: {bs_count} blind spot(s) "
+                f"(max allowed: {args.max_blind_spots})",
+                file=sys.stderr,
+            )
+        if ub_count > args.max_unbridged:
+            failed = True
+            print(
+                f"FAIL {path.name}: {ub_count} unbridged edge(s) "
+                f"(max allowed: {args.max_unbridged})",
+                file=sys.stderr,
+            )
+
+    fmt = getattr(args, "format", "text")
+    if fmt == "sarif":
+        print(format_sarif(diagnostics))
+    elif fmt == "json":
+        combined = [json.loads(format_json(d, p)) for d, p in diagnostics]
+        result = {
+            "passed": not failed,
+            "max_blind_spots": args.max_blind_spots,
+            "max_unbridged": args.max_unbridged,
+            "compositions": combined,
+        }
+        print(json.dumps(result, indent=2))
+    else:
+        for diag, path in diagnostics:
+            bs = len(diag.blind_spots)
+            ub = diag.n_unbridged
+            status = "PASS" if (
+                bs <= args.max_blind_spots and ub <= args.max_unbridged
+            ) else "FAIL"
+            print(
+                f"  {status}  {path.name}  "
+                f"blind_spots={bs}  unbridged={ub}  "
+                f"fee={diag.coherence_fee}"
+            )
+        print()
+        if failed:
+            print("  Result: FAIL")
+            print()
+            print("  Run `seam-lint diagnose <file>` for full details.")
+        else:
+            print("  Result: PASS")
+        print()
+
+    sys.exit(1 if failed else 0)
+
+
+def _cmd_infer(args: argparse.Namespace) -> None:
+    from seam_lint.infer.mcp import infer_from_manifest
+
+    if not args.manifest.exists():
+        print(f"Error: manifest not found: {args.manifest}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        result = infer_from_manifest(args.manifest)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.output:
+        args.output.write_text(result)
+        print(f"Wrote proto-composition to {args.output}", file=sys.stderr)
+    else:
+        print(result)
+
+
+def _cmd_init(args: argparse.Namespace) -> None:
+    from seam_lint.init import run_init
+    run_init(output=args.output)
+
+
+def _cmd_manifest(args: argparse.Namespace) -> None:
+    from seam_lint.manifest import (
+        generate_manifest_from_json,
+        generate_manifest_from_tools,
+        validate_manifest,
+    )
+
+    if getattr(args, "examples", False):
+        example_tools = [
+            {
+                "name": "invoice-parser",
+                "description": "Parse invoices and extract financial data",
+                "inputSchema": {
+                    "properties": {
+                        "document_path": {"type": "string"},
+                    },
+                },
+                "outputSchema": {
+                    "properties": {
+                        "total_amount": {"type": "number"},
+                        "due_date": {"type": "string"},
+                    },
+                },
+            },
+            {
+                "name": "payment-processor",
+                "description": "Process payments",
+                "inputSchema": {
+                    "properties": {
+                        "amount": {"type": "number"},
+                        "payment_date": {"type": "string"},
+                        "currency": {"type": "string"},
+                    },
+                },
+            },
+        ]
+        manifests = generate_manifest_from_tools(example_tools)
+        for m in manifests:
+            print(yaml.dump(m, default_flow_style=False, sort_keys=False))
+            print("---")
+        print(
+            f"  Generated {len(manifests)} example manifest(s).",
+            file=sys.stderr,
+        )
+        return
+
+    if args.validate:
+        path = Path(args.validate)
+        if not path.exists():
+            print(f"Error: file not found: {path}", file=sys.stderr)
+            sys.exit(1)
+        issues = validate_manifest(path)
+        if not issues:
+            print(f"  VALID  {path}")
+        else:
+            for issue in issues:
+                level = "info" if issue.startswith("Info:") else "error"
+                print(f"  [{level}] {issue}")
+            errors = [i for i in issues if not i.startswith("Info:")]
+            sys.exit(1 if errors else 0)
+        return
+
+    if args.from_json:
+        path = Path(args.from_json)
+        if not path.exists():
+            print(f"Error: file not found: {path}", file=sys.stderr)
+            sys.exit(1)
+        manifests = generate_manifest_from_json(path)
+    elif args.from_server:
+        from seam_lint.scan import scan_mcp_server
+        tools = scan_mcp_server(args.from_server)
+        manifests = generate_manifest_from_tools(tools)
+    else:
+        print("Error: provide --from-json, --from-server, or --validate", file=sys.stderr)
+        sys.exit(1)
+
+    import tempfile
+
+    all_valid = True
+    for m in manifests:
+        output_yaml = yaml.dump(m, default_flow_style=False, sort_keys=False)
+        if args.output:
+            out_path = Path(args.output)
+            if len(manifests) > 1:
+                stem = out_path.stem
+                suffix = out_path.suffix or ".yaml"
+                name = m["tool"]["name"].replace("-", "_").replace(" ", "_")
+                out_path = out_path.parent / f"{stem}_{name}{suffix}"
+            out_path.write_text(output_yaml)
+            print(f"Wrote manifest to {out_path}", file=sys.stderr)
+            issues = validate_manifest(out_path)
+        else:
+            print(output_yaml)
+            print("---")
+            # Validate via temp file
+            with tempfile.NamedTemporaryFile(
+                suffix=".yaml", mode="w", delete=False
+            ) as tf:
+                tf.write(output_yaml)
+                tmp_path = Path(tf.name)
+            try:
+                issues = validate_manifest(tmp_path)
+            finally:
+                tmp_path.unlink()
+
+        errors = [i for i in issues if not i.startswith("Info:")]
+        if errors:
+            all_valid = False
+            tool_name = m.get("tool", {}).get("name", "unknown")
+            for err in errors:
+                print(f"  [error] {tool_name}: {err}", file=sys.stderr)
+
+    if all_valid:
+        print(
+            f"  Generated {len(manifests)} manifest(s), all valid.",
+            file=sys.stderr,
+        )
+
+
+def _cmd_scan(args: argparse.Namespace) -> None:
+    from seam_lint.guard import SeamGuard
+    from seam_lint.scan import ScanError, scan_mcp_server, scan_mcp_servers
+
+    try:
+        if len(args.commands) == 1:
+            guard = SeamGuard.from_mcp_server(args.commands[0])
+        else:
+            from seam_lint.guard import _composition_from_mcp_tools
+            tools = scan_mcp_servers(args.commands)
+            comp = _composition_from_mcp_tools(tools, name="multi-server-scan")
+            guard = SeamGuard(comp)
+    except ScanError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    diag = guard.diagnose()
+    fmt = getattr(args, "format", "text")
+
+    if fmt == "json":
+        print(guard.to_json())
+    elif fmt == "sarif":
+        print(guard.to_sarif())
+    else:
+        print(guard.to_text())
+
+    if args.output:
+        guard.to_yaml(args.output)
+        print(f"Wrote composition to {args.output}", file=sys.stderr)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="seam-lint",
+        description=(
+            "Coherence fee diagnostic for agent tool compositions. "
+            "Computes blind spots invisible to bilateral verification "
+            "and recommends bridge annotations."
+        ),
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"seam-lint {__version__}"
+    )
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    # ── diagnose ──────────────────────────────────────────────────────
+    p_diag = subparsers.add_parser(
+        "diagnose",
+        help="Diagnose compositions and report blind spots",
+    )
+    p_diag.add_argument(
+        "files", nargs="*", type=Path,
+        help="YAML composition file(s) or directories",
+    )
+    p_diag.add_argument(
+        "--format",
+        choices=["text", "json", "sarif"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    p_diag.add_argument(
+        "--brief",
+        action="store_true",
+        help="One-line-per-file summary (fee + blind spot count only)",
+    )
+    p_diag.add_argument(
+        "--examples",
+        action="store_true",
+        help="Run on bundled example compositions",
+    )
+    p_diag.set_defaults(func=_cmd_diagnose)
+
+    # ── check ─────────────────────────────────────────────────────────
+    p_check = subparsers.add_parser(
+        "check",
+        help="CI/CD gate: exit 1 if compositions exceed thresholds",
+    )
+    p_check.add_argument(
+        "files", nargs="*", type=Path,
+        help="YAML composition file(s) or directories",
+    )
+    p_check.add_argument(
+        "--max-blind-spots",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Max blind spots per composition before failing (default: 0)",
+    )
+    p_check.add_argument(
+        "--max-unbridged",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Max unbridged edges per composition before failing (default: 0)",
+    )
+    p_check.add_argument(
+        "--format",
+        choices=["text", "json", "sarif"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    p_check.add_argument(
+        "--examples",
+        action="store_true",
+        help="Run on bundled example compositions",
+    )
+    p_check.set_defaults(func=_cmd_check)
+
+    # ── infer ─────────────────────────────────────────────────────────
+    p_infer = subparsers.add_parser(
+        "infer",
+        help="Infer a proto-composition YAML from an MCP manifest JSON",
+    )
+    p_infer.add_argument(
+        "manifest", type=Path,
+        help="Path to an MCP manifest JSON (list_tools response)",
+    )
+    p_infer.add_argument(
+        "-o", "--output", type=Path, default=None,
+        help="Write output to file instead of stdout",
+    )
+    p_infer.set_defaults(func=_cmd_infer)
+
+    # ── scan ──────────────────────────────────────────────────────────
+    p_scan = subparsers.add_parser(
+        "scan",
+        help="Scan live MCP server(s) via stdio and diagnose",
+    )
+    p_scan.add_argument(
+        "commands", nargs="+",
+        help="Shell command(s) to start MCP server(s)",
+    )
+    p_scan.add_argument(
+        "--format",
+        choices=["text", "json", "sarif"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    p_scan.add_argument(
+        "-o", "--output", type=Path, default=None,
+        help="Save inferred composition YAML to file",
+    )
+    p_scan.set_defaults(func=_cmd_scan)
+
+    # ── manifest ──────────────────────────────────────────────────────
+    p_manifest = subparsers.add_parser(
+        "manifest",
+        help="Generate or validate Seam Manifest files",
+    )
+    p_manifest.add_argument(
+        "--from-json", metavar="FILE",
+        help="Generate manifest(s) from an MCP manifest JSON",
+    )
+    p_manifest.add_argument(
+        "--from-server", metavar="CMD",
+        help="Generate manifest(s) from a live MCP server command",
+    )
+    p_manifest.add_argument(
+        "--validate", metavar="FILE",
+        help="Validate an existing manifest YAML",
+    )
+    p_manifest.add_argument(
+        "-o", "--output", metavar="FILE", default=None,
+        help="Write output to file instead of stdout",
+    )
+    p_manifest.add_argument(
+        "--examples",
+        action="store_true",
+        help="Generate example manifests to see the format",
+    )
+    p_manifest.set_defaults(func=_cmd_manifest)
+
+    # ── init ──────────────────────────────────────────────────────────
+    p_init = subparsers.add_parser(
+        "init",
+        help="Interactive wizard to generate a composition YAML",
+    )
+    p_init.add_argument(
+        "-o", "--output", type=Path, default=None,
+        help="Output file path (default: <name>.yaml)",
+    )
+    p_init.set_defaults(func=_cmd_init)
+
+    args = parser.parse_args()
+
+    if not args.command:
+        print(f"seam-lint {__version__} — coherence fee diagnostic\n")
+        print("Quick start:")
+        print("  seam-lint diagnose --examples     # try bundled compositions")
+        print("  seam-lint diagnose my-comp.yaml    # diagnose your own")
+        print("  seam-lint check compositions/      # CI gate (exit 1 on blind spots)")
+        print("  seam-lint manifest --from-json tools.json  # generate manifests")
+        print("  seam-lint init                     # interactive composition wizard")
+        print()
+        print("Run `seam-lint <command> --help` for details.")
+        sys.exit(0)
+
+    args.func(args)
