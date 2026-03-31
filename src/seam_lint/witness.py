@@ -18,32 +18,38 @@ from datetime import datetime, timezone
 from seam_lint import __version__
 from seam_lint.model import (
     BridgePatch,
+    Composition,
+    DEFAULT_POLICY_PROFILE,
     Diagnostic,
     Disposition,
+    PolicyProfile,
     WitnessReceipt,
 )
 
 RECEIPT_VERSION = "0.1.0"
-DEFAULT_POLICY = "witness.default.v1"
+DEFAULT_POLICY = DEFAULT_POLICY_PROFILE
 
 
 def _resolve_disposition(
     diag: Diagnostic,
-    policy_profile: str = DEFAULT_POLICY,
+    policy: PolicyProfile = DEFAULT_POLICY_PROFILE,
 ) -> Disposition:
     """Map measurement to judgment under a named policy.
 
-    The policy_profile parameter names which rule set produced this
-    disposition. Currently only ``witness.default.v1`` is implemented.
-    The parameter exists so that receipts record which policy was applied,
-    preventing the kernel from becoming a stealth judge.
+    Uses the PolicyProfile thresholds to determine disposition.
+    The profile is recorded in the receipt so consumers know which
+    judgment logic was applied.
     """
-    # witness.default.v1: the only built-in profile
-    if diag.n_unbridged > 0 and diag.coherence_fee > 0:
+    has_blind_spots = diag.n_unbridged > 0
+    has_fee = diag.coherence_fee > policy.max_fee
+    over_blind_spots = len(diag.blind_spots) > policy.max_blind_spots
+    needs_bridge = policy.require_bridge and has_blind_spots
+
+    if has_blind_spots and has_fee:
         return Disposition.REFUSE_PENDING_DISCLOSURE
-    if diag.n_unbridged > 0:
+    if needs_bridge or over_blind_spots:
         return Disposition.PROCEED_WITH_BRIDGE
-    if diag.coherence_fee > 0:
+    if has_fee:
         return Disposition.PROCEED_WITH_RECEIPT
     return Disposition.PROCEED
 
@@ -68,18 +74,23 @@ def _diagnostic_to_patches(diag: Diagnostic) -> tuple[BridgePatch, ...]:
 
 def witness(
     diag: Diagnostic,
-    composition_hash: str,
+    comp: Composition,
     unknown_dimensions: int = 0,
-    policy_profile: str = DEFAULT_POLICY,
+    policy_profile: PolicyProfile = DEFAULT_POLICY_PROFILE,
 ) -> WitnessReceipt:
-    """Produce a WitnessReceipt from a Diagnostic.
+    """Produce a WitnessReceipt from a Diagnostic and Composition.
 
     This is the core witness function. It is deterministic given the
     same inputs (except timestamp). Everything an agent needs to decide
     whether to proceed is in the receipt.
 
-    ``policy_profile`` names the disposition rule set. Recorded in the
-    receipt so consumers know which judgment logic was applied.
+    Uses ``Composition.canonical_hash()`` for composition identity —
+    hashes structure, not presentation. Two YAML files with different
+    formatting but identical semantics produce the same composition hash.
+
+    ``policy_profile`` is a PolicyProfile with explicit thresholds.
+    Recorded in the receipt so consumers can verify the disposition
+    follows from the measurement under the stated policy.
     """
     patches = _diagnostic_to_patches(diag)
     disposition = _resolve_disposition(diag, policy_profile)
@@ -87,7 +98,7 @@ def witness(
     return WitnessReceipt(
         receipt_version=RECEIPT_VERSION,
         kernel_version=__version__,
-        composition_hash=composition_hash,
+        composition_hash=comp.canonical_hash(),
         diagnostic_hash=diag.content_hash(),
         policy_profile=policy_profile,
         fee=diag.coherence_fee,
@@ -98,8 +109,3 @@ def witness(
         timestamp=datetime.now(timezone.utc).isoformat(),
         patches=patches,
     )
-
-
-def composition_hash(yaml_bytes: bytes) -> str:
-    """SHA-256 of raw composition YAML bytes."""
-    return hashlib.sha256(yaml_bytes).hexdigest()

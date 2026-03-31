@@ -126,14 +126,14 @@ class TestSeamPatch:
 class TestPolicyProfile:
     def test_default_policy_in_receipt(self):
         result = _handle_witness({"composition": MINIMAL_COMPOSITION})
-        assert result["policy_profile"] == "witness.default.v1"
+        assert result["policy_profile"]["name"] == "witness.default.v1"
 
     def test_custom_policy_name_in_receipt(self):
         result = _handle_witness({
             "composition": MINIMAL_COMPOSITION,
             "policy": "custom.strict.v2",
         })
-        assert result["policy_profile"] == "custom.strict.v2"
+        assert result["policy_profile"]["name"] == "custom.strict.v2"
 
     def test_policy_affects_receipt_hash(self):
         r1 = _handle_witness({
@@ -236,7 +236,7 @@ class TestMCPWitnessTool:
         receipt = json.loads(content[0]["text"])
         assert "receipt_hash" in receipt
         assert "disposition" in receipt
-        assert receipt["policy_profile"] == "witness.default.v1"
+        assert receipt["policy_profile"]["name"] == "witness.default.v1"
 
     def test_witness_with_blind_spots(self):
         result = _handle_witness({"composition": MINIMAL_COMPOSITION})
@@ -284,12 +284,16 @@ class TestMCPBridgeTool:
         assert result["after"]["blind_spots"] == 0
         assert "patched_composition" in result
         assert "receipt" in result
+        assert "original_receipt" in result
+        assert "patches" in result
 
     def test_bridge_clean_composition(self):
         result = _handle_bridge({"composition": CLEAN_COMPOSITION})
         assert result["before"]["blind_spots"] == 0
         assert result["after"]["blind_spots"] == 0
         assert result["patched_composition"] == CLEAN_COMPOSITION
+        # When clean, original_receipt == receipt (same composition)
+        assert result["original_receipt"] == result["receipt"]
 
     def test_bridge_receipt_reflects_patched_state(self):
         result = _handle_bridge({"composition": MINIMAL_COMPOSITION})
@@ -297,6 +301,24 @@ class TestMCPBridgeTool:
         # Receipt is for the patched composition, so should be clean
         assert receipt["blind_spots_count"] == 0
         assert receipt["disposition"] == "proceed"
+
+    def test_bridge_dual_receipt(self):
+        """Bridge emits both original and patched receipts."""
+        result = _handle_bridge({"composition": MINIMAL_COMPOSITION})
+        orig = result["original_receipt"]
+        patched = result["receipt"]
+        # Original has blind spots
+        assert orig["blind_spots_count"] > 0
+        assert orig["disposition"] != "proceed"
+        # Patched is clean
+        assert patched["blind_spots_count"] == 0
+        assert patched["disposition"] == "proceed"
+        # Different composition hashes
+        assert orig["composition_hash"] != patched["composition_hash"]
+        # Patches are Seam Patch v0.1
+        assert len(result["patches"]) > 0
+        for p in result["patches"]:
+            assert p["seam_patch_version"] == "0.1.0"
 
 
 class TestMCPErrors:
@@ -414,13 +436,12 @@ class TestHashSemantics:
         """Receipt hash includes timestamp — each witness event is unique.
         For deduplication, use diagnostic_hash instead."""
         from seam_lint.diagnostic import diagnose
-        from seam_lint.witness import witness, composition_hash
+        from seam_lint.witness import witness
 
         comp = load_composition(text=CLEAN_COMPOSITION)
         diag = diagnose(comp)
-        comp_hash = composition_hash(CLEAN_COMPOSITION.encode())
 
-        r1 = witness(diag, comp_hash)
+        r1 = witness(diag, comp)
 
         # Manually construct with different timestamp
         from seam_lint.model import Disposition, WitnessReceipt

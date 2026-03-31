@@ -48,6 +48,53 @@ class Composition:
     tools: list[ToolSpec]
     edges: list[Edge]
 
+    def canonical_hash(self) -> str:
+        """Canonical identity hash of composition structure.
+
+        Hashes the parsed semantic structure, not raw YAML bytes.
+        Two compositions with identical tools, edges, and dimensions
+        produce the same hash regardless of YAML formatting, key order,
+        or whitespace.
+        """
+        obj = {
+            "name": self.name,
+            "tools": sorted(
+                [
+                    {
+                        "name": t.name,
+                        "internal_state": sorted(t.internal_state),
+                        "observable_schema": sorted(t.observable_schema),
+                    }
+                    for t in self.tools
+                ],
+                key=lambda t: t["name"],
+            ),
+            "edges": sorted(
+                [
+                    {
+                        "from_tool": e.from_tool,
+                        "to_tool": e.to_tool,
+                        "dimensions": sorted(
+                            [
+                                {
+                                    "name": d.name,
+                                    "from_field": d.from_field,
+                                    "to_field": d.to_field,
+                                }
+                                for d in e.dimensions
+                            ],
+                            key=lambda d: d["name"],
+                        ),
+                    }
+                    for e in self.edges
+                ],
+                key=lambda e: (e["from_tool"], e["to_tool"]),
+            ),
+        }
+        return hashlib.sha256(
+            json.dumps(obj, sort_keys=True).encode()
+        ).hexdigest()
+
 
 @dataclass(frozen=True)
 class BlindSpot:
@@ -144,6 +191,39 @@ class WitnessError(Exception):
         super().__init__(f"[{code.name}] {message}")
 
 
+# ── Policy ───────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class PolicyProfile:
+    """Named, versioned policy that maps measurement to disposition.
+
+    The policy parameters are the explicit thresholds that determine
+    judgment. Recording them in the receipt makes every witness event
+    self-describing — a consumer can verify that the disposition follows
+    from the measurement under the stated policy without trusting the
+    kernel's internal logic.
+    """
+
+    name: str  # e.g. "witness.default.v1"
+    max_blind_spots: int = 0
+    max_fee: int = 0
+    max_unknown: int = -1  # -1 = unlimited
+    require_bridge: bool = True
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "max_blind_spots": self.max_blind_spots,
+            "max_fee": self.max_fee,
+            "max_unknown": self.max_unknown,
+            "require_bridge": self.require_bridge,
+        }
+
+
+DEFAULT_POLICY_PROFILE = PolicyProfile(name="witness.default.v1")
+
+
 # ── Constitutional objects ───────────────────────────────────────────
 
 
@@ -208,9 +288,9 @@ class WitnessReceipt:
 
     receipt_version: str  # "0.1.0"
     kernel_version: str  # seam-lint version
-    composition_hash: str  # SHA-256 of composition YAML
+    composition_hash: str  # Composition.canonical_hash()
     diagnostic_hash: str  # Diagnostic.content_hash()
-    policy_profile: str  # e.g. "witness.default.v1"
+    policy_profile: PolicyProfile
     fee: int
     blind_spots_count: int
     bridges_required: int
@@ -233,7 +313,7 @@ class WitnessReceipt:
             "kernel_version": self.kernel_version,
             "composition_hash": self.composition_hash,
             "diagnostic_hash": self.diagnostic_hash,
-            "policy_profile": self.policy_profile,
+            "policy_profile": self.policy_profile.to_dict(),
             "fee": self.fee,
             "blind_spots_count": self.blind_spots_count,
             "bridges_required": self.bridges_required,
@@ -254,7 +334,7 @@ class WitnessReceipt:
             "receipt_hash": self.receipt_hash,
             "composition_hash": self.composition_hash,
             "diagnostic_hash": self.diagnostic_hash,
-            "policy_profile": self.policy_profile,
+            "policy_profile": self.policy_profile.to_dict(),
             "fee": self.fee,
             "blind_spots_count": self.blind_spots_count,
             "bridges_required": self.bridges_required,

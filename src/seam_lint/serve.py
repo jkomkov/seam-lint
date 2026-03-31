@@ -28,13 +28,14 @@ import yaml
 
 from seam_lint import __version__
 from seam_lint.diagnostic import diagnose
-from seam_lint.model import WitnessError, WitnessErrorCode
-from seam_lint.parser import CompositionError, load_composition
-from seam_lint.witness import (
-    DEFAULT_POLICY,
-    composition_hash,
-    witness,
+from seam_lint.model import (
+    DEFAULT_POLICY_PROFILE,
+    PolicyProfile,
+    WitnessError,
+    WitnessErrorCode,
 )
+from seam_lint.parser import CompositionError, load_composition
+from seam_lint.witness import witness
 
 SERVER_NAME = "seam-lint"
 SERVER_VERSION = __version__
@@ -91,7 +92,7 @@ TOOLS = [
                     "description": (
                         "Named policy profile (default: witness.default.v1)"
                     ),
-                    "default": DEFAULT_POLICY,
+                    "default": DEFAULT_POLICY_PROFILE.name,
                 },
                 "depth": {
                     "type": "integer",
@@ -124,7 +125,7 @@ TOOLS = [
                     "description": (
                         "Named policy profile (default: witness.default.v1)"
                     ),
-                    "default": DEFAULT_POLICY,
+                    "default": DEFAULT_POLICY_PROFILE.name,
                 },
             },
             "required": ["composition"],
@@ -157,7 +158,7 @@ RESOURCES = [
 
 def _handle_witness(args: dict) -> dict:
     composition_yaml = args.get("composition", "")
-    policy = args.get("policy", DEFAULT_POLICY)
+    policy_name = args.get("policy", DEFAULT_POLICY_PROFILE.name)
     depth = args.get("depth", 0)
 
     if depth > MAX_DEPTH:
@@ -166,33 +167,33 @@ def _handle_witness(args: dict) -> dict:
             f"Recursion depth {depth} exceeds max {MAX_DEPTH}",
         )
 
+    policy = PolicyProfile(name=policy_name)
     comp = load_composition(text=composition_yaml)
     diag = diagnose(comp)
-    comp_hash = composition_hash(composition_yaml.encode())
-    receipt = witness(diag, comp_hash, policy_profile=policy)
+    receipt = witness(diag, comp, policy_profile=policy)
     return receipt.to_dict()
 
 
 def _handle_bridge(args: dict) -> dict:
     composition_yaml = args.get("composition", "")
-    policy = args.get("policy", DEFAULT_POLICY)
+    policy_name = args.get("policy", DEFAULT_POLICY_PROFILE.name)
+    policy = PolicyProfile(name=policy_name)
 
-    # Diagnose original
+    # Diagnose and witness original
     comp = load_composition(text=composition_yaml)
     diag = diagnose(comp)
+    original_receipt = witness(diag, comp, policy_profile=policy)
     before_bs = len(diag.blind_spots)
 
     if before_bs == 0:
-        comp_hash = composition_hash(composition_yaml.encode())
-        receipt = witness(diag, comp_hash, policy_profile=policy)
         return {
             "patched_composition": composition_yaml,
-            "receipt": receipt.to_dict(),
+            "original_receipt": original_receipt.to_dict(),
+            "receipt": original_receipt.to_dict(),
+            "patches": [],
             "before": {"blind_spots": 0},
             "after": {"blind_spots": 0},
         }
-
-    original_hash = composition_hash(composition_yaml.encode())
 
     # Apply bridges to raw YAML
     raw = yaml.safe_load(composition_yaml)
@@ -210,16 +211,16 @@ def _handle_bridge(args: dict) -> dict:
 
     patched_yaml = yaml.dump(raw, default_flow_style=False, sort_keys=False)
 
-    # Re-diagnose and witness
+    # Re-diagnose and witness patched
     patched_comp = load_composition(text=patched_yaml)
     patched_diag = diagnose(patched_comp)
-    comp_hash = composition_hash(patched_yaml.encode())
-    receipt = witness(patched_diag, comp_hash, policy_profile=policy)
+    patched_receipt = witness(patched_diag, patched_comp, policy_profile=policy)
 
     return {
         "patched_composition": patched_yaml,
-        "original_composition_hash": original_hash,
-        "receipt": receipt.to_dict(),
+        "original_receipt": original_receipt.to_dict(),
+        "receipt": patched_receipt.to_dict(),
+        "patches": [p.to_seam_patch() for p in original_receipt.patches],
         "before": {"blind_spots": before_bs},
         "after": {"blind_spots": len(patched_diag.blind_spots)},
     }

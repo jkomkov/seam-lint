@@ -404,9 +404,8 @@ def _cmd_bridge(args: argparse.Namespace) -> None:
 
         fmt = getattr(args, "format", "yaml")
         if fmt == "json-patch":
-            from seam_lint.witness import witness, composition_hash
-            comp_hash = composition_hash(path.read_bytes())
-            receipt = witness(diag, comp_hash)
+            from seam_lint.witness import witness
+            receipt = witness(diag, comp)
             patches = [p.to_seam_patch() for p in receipt.patches]
             print(json.dumps(patches, indent=2))
         else:
@@ -450,7 +449,7 @@ def _cmd_witness(args: argparse.Namespace) -> None:
         print("No composition files found.", file=sys.stderr)
         sys.exit(1)
 
-    from seam_lint.witness import witness, composition_hash
+    from seam_lint.witness import witness
 
     receipts = []
     for path in paths:
@@ -464,8 +463,7 @@ def _cmd_witness(args: argparse.Namespace) -> None:
             print(f"Error processing {path}: {e}", file=sys.stderr)
             sys.exit(1)
 
-        comp_hash = composition_hash(path.read_bytes())
-        receipt = witness(diag, comp_hash)
+        receipt = witness(diag, comp)
         receipts.append(receipt.to_dict())
 
     if len(receipts) == 1:

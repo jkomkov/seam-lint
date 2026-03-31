@@ -10,15 +10,17 @@ from seam_lint.model import (
     BlindSpot,
     Bridge,
     BridgePatch,
+    DEFAULT_POLICY_PROFILE,
     Diagnostic,
     Disposition,
+    PolicyProfile,
     WitnessReceipt,
 )
+from seam_lint.model import Composition, Edge, SemanticDimension, ToolSpec
 from seam_lint.witness import (
     RECEIPT_VERSION,
     _diagnostic_to_patches,
     _resolve_disposition,
-    composition_hash,
     witness,
 )
 
@@ -65,6 +67,17 @@ SAMPLE_BRIDGE = Bridge(
     field="amount_scale",
     add_to=["parser"],
     eliminates="amount_unit",
+)
+
+SAMPLE_COMPOSITION = Composition(
+    name="test-composition",
+    tools=[
+        ToolSpec("a", ("x", "y"), ("x",)),
+        ToolSpec("b", ("x", "z"), ("x",)),
+    ],
+    edges=[
+        Edge("a", "b", (SemanticDimension("d", "y", "z"),)),
+    ],
 )
 
 
@@ -144,7 +157,7 @@ class TestWitnessReceipt:
             kernel_version="0.5.0",
             composition_hash="abc123",
             diagnostic_hash="def456",
-            policy_profile="witness.default.v1",
+            policy_profile=DEFAULT_POLICY_PROFILE,
             fee=0,
             blind_spots_count=0,
             bridges_required=0,
@@ -157,7 +170,7 @@ class TestWitnessReceipt:
             kernel_version="0.5.0",
             composition_hash="abc123",
             diagnostic_hash="def456",
-            policy_profile="witness.default.v1",
+            policy_profile=DEFAULT_POLICY_PROFILE,
             fee=0,
             blind_spots_count=0,
             bridges_required=0,
@@ -173,7 +186,7 @@ class TestWitnessReceipt:
             kernel_version="0.5.0",
             composition_hash="abc123",
             diagnostic_hash="def456",
-            policy_profile="witness.default.v1",
+            policy_profile=DEFAULT_POLICY_PROFILE,
             fee=0,
             blind_spots_count=0,
             bridges_required=0,
@@ -186,7 +199,7 @@ class TestWitnessReceipt:
             kernel_version="0.5.0",
             composition_hash="abc123",
             diagnostic_hash="def456",
-            policy_profile="witness.default.v1",
+            policy_profile=DEFAULT_POLICY_PROFILE,
             fee=1,  # different fee
             blind_spots_count=0,
             bridges_required=0,
@@ -202,7 +215,7 @@ class TestWitnessReceipt:
             kernel_version="0.5.0",
             composition_hash="abc",
             diagnostic_hash="def",
-            policy_profile="witness.default.v1",
+            policy_profile=DEFAULT_POLICY_PROFILE,
             fee=0,
             blind_spots_count=0,
             bridges_required=0,
@@ -216,7 +229,7 @@ class TestWitnessReceipt:
             kernel_version="0.5.0",
             composition_hash="abc",
             diagnostic_hash="def",
-            policy_profile="witness.default.v1",
+            policy_profile=DEFAULT_POLICY_PROFILE,
             fee=0,
             blind_spots_count=0,
             bridges_required=0,
@@ -233,7 +246,7 @@ class TestWitnessReceipt:
             kernel_version="0.5.0",
             composition_hash="abc",
             diagnostic_hash="def",
-            policy_profile="witness.default.v1",
+            policy_profile=DEFAULT_POLICY_PROFILE,
             fee=0,
             blind_spots_count=0,
             bridges_required=0,
@@ -253,7 +266,7 @@ class TestWitnessReceipt:
             kernel_version="0.5.0",
             composition_hash="abc",
             diagnostic_hash="def",
-            policy_profile="witness.default.v1",
+            policy_profile=DEFAULT_POLICY_PROFILE,
             fee=0,
             blind_spots_count=0,
             bridges_required=0,
@@ -291,12 +304,12 @@ class TestDiagnosticContentHash:
 class TestWitnessFunction:
     def test_clean_composition(self):
         diag = _make_diagnostic(fee=0)
-        receipt = witness(diag, "comp_hash_abc")
+        receipt = witness(diag, SAMPLE_COMPOSITION)
         assert receipt.disposition == Disposition.PROCEED
         assert receipt.fee == 0
         assert receipt.blind_spots_count == 0
         assert receipt.patches == ()
-        assert receipt.composition_hash == "comp_hash_abc"
+        assert receipt.composition_hash == SAMPLE_COMPOSITION.canonical_hash()
         assert receipt.receipt_version == RECEIPT_VERSION
 
     def test_composition_with_blind_spots(self):
@@ -306,7 +319,7 @@ class TestWitnessFunction:
             bridges=[SAMPLE_BRIDGE],
             n_unbridged=1,
         )
-        receipt = witness(diag, "hash_xyz")
+        receipt = witness(diag, SAMPLE_COMPOSITION)
         assert receipt.disposition == Disposition.PROCEED_WITH_BRIDGE
         assert receipt.blind_spots_count == 1
         assert receipt.bridges_required == 1
@@ -316,7 +329,7 @@ class TestWitnessFunction:
 
     def test_receipt_hash_is_sha256(self):
         diag = _make_diagnostic(fee=0)
-        receipt = witness(diag, "abc")
+        receipt = witness(diag, SAMPLE_COMPOSITION)
         assert len(receipt.receipt_hash) == 64  # SHA-256 hex
 
     def test_diagnostic_to_patches(self):
@@ -333,16 +346,64 @@ class TestWitnessFunction:
         assert patches[2].target_tool == "tool_c"
 
 
-# ── composition_hash ─────────────────────────────────────────────────
+# ── Canonical composition hash ───────────────────────────────────────
 
 
-class TestCompositionHash:
+class TestCanonicalHash:
     def test_deterministic(self):
-        data = b"name: test\ntools: {}"
-        assert composition_hash(data) == composition_hash(data)
+        assert SAMPLE_COMPOSITION.canonical_hash() == SAMPLE_COMPOSITION.canonical_hash()
 
-    def test_different_content(self):
-        assert composition_hash(b"a") != composition_hash(b"b")
+    def test_different_composition(self):
+        other = Composition(
+            name="other",
+            tools=[ToolSpec("z", ("a",), ("a",))],
+            edges=[],
+        )
+        assert SAMPLE_COMPOSITION.canonical_hash() != other.canonical_hash()
 
     def test_is_sha256(self):
-        assert len(composition_hash(b"test")) == 64
+        assert len(SAMPLE_COMPOSITION.canonical_hash()) == 64
+
+    def test_formatting_independent(self):
+        """Two compositions built from different YAML but same structure
+        must produce the same canonical hash."""
+        from seam_lint.parser import load_composition
+
+        yaml_v1 = (
+            "name: x\n"
+            "tools:\n"
+            "  a:\n"
+            "    internal_state: [p, q]\n"
+            "    observable_schema: [p]\n"
+            "  b:\n"
+            "    internal_state: [p, r]\n"
+            "    observable_schema: [p]\n"
+            "edges:\n"
+            "  - from: a\n"
+            "    to: b\n"
+            "    dimensions:\n"
+            "      - name: d\n"
+            "        from_field: q\n"
+            "        to_field: r\n"
+        )
+        # Same structure, different key order and extra whitespace
+        yaml_v2 = (
+            "name:   x\n"
+            "edges:\n"
+            "  - to: b\n"
+            "    from: a\n"
+            "    dimensions:\n"
+            "      - from_field: q\n"
+            "        to_field: r\n"
+            "        name: d\n"
+            "tools:\n"
+            "  b:\n"
+            "    observable_schema: [p]\n"
+            "    internal_state: [p, r]\n"
+            "  a:\n"
+            "    observable_schema: [p]\n"
+            "    internal_state: [p, q]\n"
+        )
+        c1 = load_composition(text=yaml_v1)
+        c2 = load_composition(text=yaml_v2)
+        assert c1.canonical_hash() == c2.canonical_hash()
