@@ -52,6 +52,20 @@ def format_text(d: Diagnostic) -> str:
     lines.append("")
 
     if d.blind_spots:
+        if d.coherence_fee == 0:
+            lines.append(
+                "  Note: fee = 0 but blind spots exist. The coherence fee"
+            )
+            lines.append(
+                "  measures topological information loss (H\u00b9); blind spots"
+            )
+            lines.append(
+                "  are hidden fields on edges. One-sided hiding reduces"
+            )
+            lines.append(
+                "  auditability without changing H\u00b9."
+            )
+            lines.append("")
         lines.append(f"  Blind spots ({len(d.blind_spots)}):")
         for i, bs in enumerate(d.blind_spots, 1):
             edge_parts = bs.edge.split(" \u2192 ")

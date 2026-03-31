@@ -14,10 +14,11 @@ import yaml
 
 from seam_lint.diagnostic import diagnose as _diagnose
 from seam_lint.formatters import format_json, format_sarif, format_text
-from seam_lint.infer.classifier import classify_fields
+from seam_lint.infer.classifier import classify_fields, classify_tool_rich
 from seam_lint.infer.mcp import (
     _extract_tool_fields,
     _find_shared_dimensions,
+    extract_field_infos,
 )
 from seam_lint.model import (
     Composition,
@@ -274,8 +275,9 @@ def _composition_from_mcp_tools(
     for tool in tools_list:
         raw_name = tool.get("name", "unknown_tool")
         safe_name = raw_name.replace("-", "_").replace(" ", "_")
-        fields = _extract_tool_fields(tool)
-        inferred = classify_fields(fields)
+        field_infos = extract_field_infos(tool)
+        fields = [fi.name for fi in field_infos]
+        inferred = classify_tool_rich(tool, field_infos=field_infos)
         inferred_field_names = {d.field_name for d in inferred}
         observable = [f for f in fields if f not in inferred_field_names]
 

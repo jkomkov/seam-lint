@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from seam_lint import __version__
+
 COMPOSITIONS_DIR = Path(__file__).parent.parent / "compositions"
 AUTH = COMPOSITIONS_DIR / "auth_pipeline.yaml"
 FINANCIAL = COMPOSITIONS_DIR / "financial_pipeline.yaml"
@@ -32,7 +34,7 @@ class TestDiagnoseCommand:
         assert r.returncode == 0
         data = json.loads(r.stdout)
         assert data["coherence_fee"] == 2
-        assert data["seam_lint_version"] == "0.2.0"
+        assert data["seam_lint_version"] == __version__
         assert "composition_sha256" in data
         assert "timestamp" in data
 
@@ -131,4 +133,4 @@ class TestVersionFlag:
     def test_version(self):
         r = _run("--version")
         assert r.returncode == 0
-        assert "0.2.0" in r.stdout
+        assert __version__ in r.stdout

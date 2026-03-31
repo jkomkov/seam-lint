@@ -9,8 +9,8 @@ from typing import Any
 
 import yaml
 
-from seam_lint.infer.classifier import classify_fields
-from seam_lint.infer.mcp import _extract_tool_fields
+from seam_lint.infer.classifier import classify_tool_rich
+from seam_lint.infer.mcp import extract_field_infos
 
 
 def load_taxonomy() -> dict[str, Any]:
@@ -79,20 +79,23 @@ def validate_manifest(path: Path) -> list[str]:
 def generate_manifest_from_tools(
     tools_list: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Generate manifest dicts from a list of MCP tool definitions."""
+    """Generate manifest dicts from a list of MCP tool definitions.
+
+    Uses multi-signal classification (field names, descriptions, JSON
+    Schema metadata) to produce manifests with three-tier confidence.
+    """
     manifests: list[dict[str, Any]] = []
     for tool in tools_list:
         name = tool.get("name", "unknown_tool")
-        fields = _extract_tool_fields(tool)
-        inferred = classify_fields(fields)
+        field_infos = extract_field_infos(tool)
+        inferred = classify_tool_rich(tool, field_infos=field_infos)
 
-        # Map classifier's internal grades to manifest spec vocabulary
-        _CONFIDENCE_MAP = {"high": "inferred", "medium": "inferred"}
         conventions: dict[str, Any] = {}
         for dim in inferred:
-            conventions[dim.dimension] = {
-                "confidence": _CONFIDENCE_MAP.get(dim.confidence, dim.confidence),
-            }
+            entry: dict[str, Any] = {"confidence": dim.confidence}
+            if dim.sources:
+                entry["sources"] = list(dim.sources)
+            conventions[dim.dimension] = entry
 
         manifest: dict[str, Any] = {
             "seam_manifest": "0.1",

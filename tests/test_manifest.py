@@ -22,7 +22,7 @@ class TestTaxonomy:
     def test_loads(self):
         tax = load_taxonomy()
         assert "taxonomy_version" in tax
-        assert tax["taxonomy_version"] == "0.1"
+        assert tax["taxonomy_version"] in ("0.1", "0.2")
 
     def test_has_10_dimensions(self):
         tax = load_taxonomy()

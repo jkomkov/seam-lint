@@ -12,40 +12,99 @@ from typing import Any
 
 import yaml
 
-from seam_lint.infer.classifier import InferredDimension, classify_fields
+from seam_lint.infer.classifier import (
+    FieldInfo,
+    InferredDimension,
+    classify_fields,
+    classify_tool_rich,
+)
 
 
-def _extract_fields_from_schema(schema: dict[str, Any]) -> list[str]:
-    """Extract field names from a JSON Schema object (properties)."""
-    if not isinstance(schema, dict):
+# ── Field extraction ───────────────────────────────────────────────────
+
+MAX_NESTING_DEPTH = 3
+
+
+def _extract_field_infos_from_schema(
+    schema: dict[str, Any],
+    prefix: str = "",
+    depth: int = 0,
+) -> list[FieldInfo]:
+    """Recursively extract FieldInfo objects from a JSON Schema."""
+    if depth >= MAX_NESTING_DEPTH or not isinstance(schema, dict):
         return []
     props = schema.get("properties", {})
-    if isinstance(props, dict):
-        return list(props.keys())
-    return []
+    if not isinstance(props, dict):
+        return []
+
+    results: list[FieldInfo] = []
+    for name, prop_schema in props.items():
+        full_name = f"{prefix}.{name}" if prefix else name
+        if not isinstance(prop_schema, dict):
+            results.append(FieldInfo(name=full_name))
+            continue
+
+        enum_raw = prop_schema.get("enum")
+        enum_val = None
+        if isinstance(enum_raw, list):
+            enum_val = tuple(str(v) for v in enum_raw)
+
+        minimum = prop_schema.get("minimum")
+        maximum = prop_schema.get("maximum")
+
+        results.append(FieldInfo(
+            name=full_name,
+            schema_type=prop_schema.get("type"),
+            format=prop_schema.get("format"),
+            enum=enum_val,
+            minimum=float(minimum) if minimum is not None else None,
+            maximum=float(maximum) if maximum is not None else None,
+            pattern=prop_schema.get("pattern"),
+            description=prop_schema.get("description"),
+        ))
+
+        if prop_schema.get("type") == "object":
+            results.extend(_extract_field_infos_from_schema(
+                prop_schema, full_name, depth + 1,
+            ))
+
+    return results
+
+
+def extract_field_infos(tool: dict[str, Any]) -> list[FieldInfo]:
+    """Extract FieldInfo objects from a tool's input/output schemas."""
+    infos: list[FieldInfo] = []
+    input_schema = tool.get("inputSchema", {})
+    infos.extend(_extract_field_infos_from_schema(input_schema))
+    output_schema = tool.get("outputSchema", {})
+    infos.extend(_extract_field_infos_from_schema(output_schema))
+
+    seen: set[str] = set()
+    deduped: list[FieldInfo] = []
+    for fi in infos:
+        if fi.name not in seen:
+            seen.add(fi.name)
+            deduped.append(fi)
+    return deduped
 
 
 def _extract_tool_fields(tool: dict[str, Any]) -> list[str]:
-    """Extract all field names from a tool's input/output schemas."""
-    fields: list[str] = []
-    input_schema = tool.get("inputSchema", {})
-    fields.extend(_extract_fields_from_schema(input_schema))
-    output_schema = tool.get("outputSchema", {})
-    fields.extend(_extract_fields_from_schema(output_schema))
-    return list(dict.fromkeys(fields))  # deduplicate preserving order
+    """Extract all field names from a tool's input/output schemas.
+
+    Backward-compatible: returns flat list of field name strings.
+    Includes nested fields as dot-path names.
+    """
+    infos = extract_field_infos(tool)
+    return [fi.name for fi in infos]
+
+
+# ── Shared dimension detection ─────────────────────────────────────────
 
 
 def _find_shared_dimensions(
     tools_dims: dict[str, list[InferredDimension]],
 ) -> list[dict[str, Any]]:
     """Find edges: tools sharing inferred dimensions of the same type."""
-    dim_to_tools: dict[str, list[tuple[str, str]]] = {}
-    for tool_name, dims in tools_dims.items():
-        for d in dims:
-            dim_to_tools.setdefault(d.dimension, []).append(
-                (tool_name, d.field_name)
-            )
-
     edges: list[dict[str, Any]] = []
     tool_names = list(tools_dims.keys())
     for i, t1 in enumerate(tool_names):
@@ -67,6 +126,9 @@ def _find_shared_dimensions(
                     "dimensions": shared,
                 })
     return edges
+
+
+# ── Composition inference ──────────────────────────────────────────────
 
 
 def infer_from_manifest(manifest_path: Path) -> str:
@@ -95,8 +157,10 @@ def infer_from_manifest(manifest_path: Path) -> str:
     for tool in tools_list:
         name = tool.get("name", "unknown_tool")
         safe_name = name.replace("-", "_").replace(" ", "_")
-        fields = _extract_tool_fields(tool)
-        inferred = classify_fields(fields)
+
+        field_infos = extract_field_infos(tool)
+        fields = [fi.name for fi in field_infos]
+        inferred = classify_tool_rich(tool, field_infos=field_infos)
 
         inferred_field_names = {d.field_name for d in inferred}
         observable = [f for f in fields if f not in inferred_field_names]
@@ -119,9 +183,10 @@ def infer_from_manifest(manifest_path: Path) -> str:
         if dims:
             lines.append(f"# REVIEW: {tool_name} inferred dimensions:")
             for d in dims:
+                sources_str = "+".join(d.sources) if d.sources else "name"
                 lines.append(
                     f"#   {d.field_name} -> {d.dimension} "
-                    f"(confidence: {d.confidence})"
+                    f"(confidence: {d.confidence}, sources: {sources_str})"
                 )
             lines.append("")
 

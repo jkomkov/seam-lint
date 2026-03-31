@@ -1,4 +1,4 @@
-taxonomy_version: "0.1"
+taxonomy_version: "0.2"
 dimensions:
   date_format:
     description: "How dates and timestamps are represented"
@@ -16,6 +16,21 @@ dimensions:
       - "created_at"
       - "updated_at"
       - "*_datetime"
+    description_keywords:
+      - "iso-8601"
+      - "iso 8601"
+      - "unix epoch"
+      - "unix timestamp"
+      - "utc time"
+      - "rfc 3339"
+      - "rfc3339"
+      - "yyyy-mm-dd"
+      - "date format"
+      - "datetime format"
+      - "timestamp format"
+      - "business days"
+      - "calendar days"
+      - "trading days"
     domains:
       - "universal"
 
@@ -27,6 +42,15 @@ dimensions:
       - "basis_points"
       - "thousands"
       - "millions"
+      - "satoshis"
+      - "wei"
+      - "gwei"
+      - "USD"
+      - "EUR"
+      - "GBP"
+      - "JPY"
+      - "CNY"
+      - "BTC"
     field_patterns:
       - "*_amount"
       - "*_price"
@@ -34,6 +58,20 @@ dimensions:
       - "*_fee"
       - "*_total"
       - "*_balance"
+    description_keywords:
+      - "in cents"
+      - "in dollars"
+      - "in pennies"
+      - "in satoshis"
+      - "basis points"
+      - "in wei"
+      - "in gwei"
+      - "smallest unit"
+      - "minor unit"
+      - "major unit"
+      - "currency unit"
+      - "monetary amount"
+      - "financial amount"
     domains:
       - "financial"
 
@@ -49,6 +87,15 @@ dimensions:
       - "*_percent"
       - "*_ratio"
       - "*_probability"
+    description_keywords:
+      - "as a percentage"
+      - "as a decimal"
+      - "between 0 and 1"
+      - "0 to 100"
+      - "per mille"
+      - "basis points"
+      - "probability"
+      - "fraction of"
     domains:
       - "financial"
       - "ml"
@@ -66,6 +113,15 @@ dimensions:
       - "*_rating"
       - "*_priority"
       - "*_rank"
+    description_keywords:
+      - "on a scale"
+      - "1 to 5"
+      - "0 to 10"
+      - "0 to 100"
+      - "star rating"
+      - "priority level"
+      - "severity level"
+      - "normalized score"
     domains:
       - "universal"
 
@@ -81,6 +137,14 @@ dimensions:
       - "*_index"
       - "*_offset"
       - "*_position"
+    description_keywords:
+      - "zero-based"
+      - "one-based"
+      - "0-indexed"
+      - "1-indexed"
+      - "zero indexed"
+      - "one indexed"
+      - "auto-increment"
     domains:
       - "universal"
 
@@ -96,6 +160,15 @@ dimensions:
       - "*_precision"
       - "*_decimals"
       - "*_rounding"
+    description_keywords:
+      - "decimal places"
+      - "significant digits"
+      - "rounding"
+      - "banker's rounding"
+      - "round half"
+      - "truncation"
+      - "floating point"
+      - "fixed point"
     domains:
       - "financial"
       - "scientific"
@@ -110,6 +183,15 @@ dimensions:
     field_patterns:
       - "*_encoding"
       - "*_charset"
+    description_keywords:
+      - "utf-8"
+      - "utf8"
+      - "ascii"
+      - "latin-1"
+      - "iso-8859"
+      - "character encoding"
+      - "text encoding"
+      - "unicode"
     domains:
       - "devops"
       - "universal"
@@ -123,6 +205,15 @@ dimensions:
       - "sentinel_value"
       - "omit_field"
     field_patterns: []
+    description_keywords:
+      - "null value"
+      - "missing value"
+      - "empty string"
+      - "sentinel value"
+      - "nan"
+      - "none value"
+      - "omit field"
+      - "optional field"
     domains:
       - "universal"
 
@@ -137,6 +228,16 @@ dimensions:
     field_patterns:
       - "*_tz"
       - "*_timezone"
+    description_keywords:
+      - "utc"
+      - "timezone"
+      - "time zone"
+      - "local time"
+      - "eastern time"
+      - "pacific time"
+      - "gmt"
+      - "tz offset"
+      - "utc offset"
     domains:
       - "universal"
 
@@ -149,5 +250,11 @@ dimensions:
     field_patterns:
       - "*_text"
       - "*_content"
+    description_keywords:
+      - "line ending"
+      - "newline"
+      - "crlf"
+      - "line feed"
+      - "carriage return"
     domains:
       - "devops"

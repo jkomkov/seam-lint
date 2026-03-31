@@ -1,0 +1,88 @@
+name: "seam-lint"
+description: "Run seam-lint coherence analysis on agent tool compositions"
+author: "Res Agentica"
+
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  path:
+    description: "Path to composition YAML file(s) or directory"
+    required: false
+    default: "compositions/"
+  max-blind-spots:
+    description: "Maximum blind spots before failing (default: 0)"
+    required: false
+    default: "0"
+  max-unbridged:
+    description: "Maximum unbridged edges before failing (default: 0)"
+    required: false
+    default: "0"
+  upload-sarif:
+    description: "Upload SARIF results to GitHub Code Scanning (default: true)"
+    required: false
+    default: "true"
+  version:
+    description: "seam-lint version to install (default: latest)"
+    required: false
+    default: ""
+  python-version:
+    description: "Python version to use (default: 3.11)"
+    required: false
+    default: "3.11"
+
+outputs:
+  passed:
+    description: "Whether all compositions passed the thresholds"
+    value: ${{ steps.check.outputs.passed }}
+  sarif-file:
+    description: "Path to the generated SARIF file"
+    value: ${{ steps.check.outputs.sarif_file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install seam-lint
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.version }}" ]; then
+          pip install "seam-lint==${{ inputs.version }}"
+        else
+          pip install seam-lint
+        fi
+
+    - name: Run seam-lint check
+      id: check
+      shell: bash
+      run: |
+        SARIF_FILE="seam-lint-results.sarif"
+        echo "sarif_file=${SARIF_FILE}" >> "$GITHUB_OUTPUT"
+
+        # Single run: generate SARIF and capture exit code
+        EXIT_CODE=0
+        seam-lint check \
+          --max-blind-spots "${{ inputs.max-blind-spots }}" \
+          --max-unbridged "${{ inputs.max-unbridged }}" \
+          --format sarif \
+          ${{ inputs.path }} > "${SARIF_FILE}" 2>/dev/null || EXIT_CODE=$?
+
+        if [ "$EXIT_CODE" -eq 0 ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+          echo "::error::seam-lint check failed. Run 'seam-lint diagnose ${{ inputs.path }}' for details."
+          exit 1
+        fi
+
+    - name: Upload SARIF to GitHub Code Scanning
+      if: always() && inputs.upload-sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: seam-lint-results.sarif
+      continue-on-error: true
